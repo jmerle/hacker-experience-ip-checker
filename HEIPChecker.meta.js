@@ -8,4 +8,6 @@
 // @match        https://en.hackerexperience.com/*
 // @match        https://br.hackerexperience.com/*
 // @grant        none
+// @updateURL    https://gitcdn.xyz/repo/JvanMerle/hacker-experience-ip-checker/master/HEIPChecker.meta.js
+// @downloadURL  https://gitcdn.xyz/repo/JvanMerle/hacker-experience-ip-checker/master/HEIPChecker.user.js
 // ==/UserScript==
