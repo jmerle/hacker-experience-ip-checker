@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         HE IP Checker
 // @namespace    HEIPChecker
-// @version      1.1.2
-// @description  HE IP Checker is a little userscript that checks IP addresses for their types and if they exist. You can do a maximum of 2,500 IP's at once (to prevent IP brute-forcing). It injects into the breadcrumb bar, and the input window opens when you click the link the 'Check IP's' link just beneath where your bank money is shown.
+// @version      1.2.0
+// @description  HE IP Checker is a little userscript that checks IP addresses for their types and if they exist. It injects into the breadcrumb bar, and the input window opens when you click the link the 'Check IP's' link just beneath where your bank money is shown.
 // @author       Jasper van Merle
 // @match        https://legacy.hackerexperience.com/*
 // @match        https://en.hackerexperience.com/*
@@ -14,211 +14,277 @@
 
 const ISP_IP = '21.70.29.160';
 
-var IPChecker = {};
+const modal = `
+  <div class="fade modal" id="input-modal" tabindex="-1" style="transition: all 1s;">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h4 class="modal-title">
+            HE IP Checker by <a href="https://legacy.hackerexperience.com/profile?id=510033" target="_blank">Jasperr</a>
+          </h4>
+        </div>
+      
+        <form id="input-form">
+          <div class="modal-body">
+            <div class="row-fluid">
+              <div class="span6">
+                <label for="ip-input" style="font-weight: bold;">Logs / IP's</label>
+                <textarea id="ip-input" class="form-control" style="width: calc(100% - 15px);" rows="10"></textarea>
+              </div>
+              <div class="span6">
+                <label for="ignored-input" style="font-weight: bold;">Ignored IP's</label>
+                <textarea id="ignored-input" class="form-control" style="width: calc(100% - 15px);" rows="10"></textarea>
+              </div>
+            </div>
+            
+            <div id="results">
+              <div class="row-fluid">
+                <div class="span3">
+                  <label style="font-weight: bold;">Information</label>               
+                  <b>Progress: </b><span id="amount-checked">0</span> / <span id="amount-total">0</span>
+                  <br>
+                  <b>Non-existing IP's: </b><span id="amount-non-existing">0</span>
+                  <br>
+                  <b>Failed checks: </b><span id="amount-failed">0</span>
+                  <br>
+                  <p>Failed checks are logged to the browser console (F12 > Console).</p>
+                </div>
+                <div class="span3">
+                  <label for="npc-input" style="font-weight: bold;">NPC's (<span id="npc-input-amount">0</span>)</label>
+                  <textarea id="npc-input" class="form-control" style="width: 95%;" rows="5"></textarea>
+                </div>
+                <div class="span3">
+                  <label for="vpc-input" style="font-weight: bold;">VPC's (<span id="vpc-input-amount">0</span>)</label>
+                  <textarea id="vpc-input" class="form-control" style="width: 95%;" rows="5"></textarea>
+                </div>
+                <div class="span3">
+                  <label for="clan-input" style="font-weight: bold;">Clan Servers (<span id="clan-input-amount">0</span>)</label>
+                  <textarea id="clan-input" class="form-control" style="width: 95%;" rows="5"></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="modal-footer">
+            <button class="btn btn-default" data-dismiss="modal" type="button">Close</button>
+            <button class="btn btn-primary" id="submit-button" type="submit">Check my IP's</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+`;
 
-IPChecker.Utils = {};
+const modalLink = `
+  <span class="pull-right hide-phone">
+    <a href="javascript:void(0)" id="ip-check-link">Check IP's</a>
+  </span>
+`;
 
-IPChecker.Utils.isGritterLoaded = false;
-IPChecker.Utils.notify = function(title, message) {
-    if (!IPChecker.Utils.isGritterLoaded) {
-        $('<link rel="stylesheet" type="text/css" href="css/jquery.gritter.css">').appendTo('head');
-        $.getScript('js/jquery.gritter.min.js', function() {
-            $.gritter.add({
-                title: title,
-                text: message,
-                image: '',
-                sticky: false
-            });
-        });
-        IPChecker.Utils.isGritterLoaded = true;
-        return;
-    }
+let npcServers = [];
+let vpcServers = [];
+let clanServers = [];
+let nonExisting = [];
+let erroring = [];
+let isChecking = false;
+let isCancelling = false;
+
+function notify(message) {
+  const doNotify = () =>
     $.gritter.add({
-        title: title,
-        text: message,
-        image: '',
-        sticky: false
+      title: 'HE IP Checker',
+      text: message,
+      image: '',
+      sticky: false
     });
-};
 
-IPChecker.Utils.getParameterByName = function(name) {
-    name = name.replace(/[\[\]]/g, '\\$&');
-    var regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)');
-    var results = regex.exec(window.location.href);
-    if (!results) return null;
-    if (!results[2]) return '';
-    return decodeURIComponent(results[2].replace(/\+/g, ' '));
-};
+  if ($.gritter) {
+    doNotify();
+  } else {
+    $('<link rel="stylesheet" type="text/css" href="css/jquery.gritter.css">').appendTo('head');
+    $.getScript('js/jquery.gritter.min.js', () => doNotify());
+  }
+}
 
-IPChecker.Utils.validateIP = function(ipAddress) {
-    if (/^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(ipAddress) && ipAddress !== ISP_IP) {
-        return true;
+function getParameterByName(name) {
+  name = name.replace(/[\[\]]/g, '\\$&');
+
+  const regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)');
+  const results = regex.exec(window.location.href);
+
+  if (!results) return null;
+  if (!results[2]) return '';
+
+  return decodeURIComponent(results[2].replace(/\+/g, ' '));
+}
+
+function getCurrentIP() {
+  return getParameterByName('ip') || '1.2.3.4';
+}
+
+function formatNumber(n) {
+  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function getIPsFromString(str) {
+  const regex = /(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/g;
+  return str.match(regex) || [];
+}
+
+function getIPsToCheck() {
+  const toCheck = getIPsFromString($('#ip-input').val());
+  const ignored = getIPsFromString($('#ignored-input').val());
+  return toCheck.filter(x => !ignored.includes(x));
+}
+
+function executePromises(funcs) {
+  return funcs.reduce((promise, func) => {
+    return promise.then(x => func().then(Array.prototype.concat.bind(x)));
+  }, Promise.resolve([]));
+}
+
+function visitIP(ip) {
+  return fetch(`${window.location.origin}/internet?ip=${ip}`, {
+    credentials: 'include',
+  }).then(data => data.text());
+}
+
+function checkIP(ip) {
+  return new Promise(resolve => {
+    if (isCancelling) {
+      resolve();
+    } else {
+      visitIP(ip)
+        .then(data => {
+          if ($('a[href="logout"]', data).length === 0) {
+            return Promise.reject(new Error('You\'re not logged in!'));
+          } else if ($('.widget-content:contains("404")', data).length > 0) {
+            nonExisting.push(ip);
+          } else {
+            switch ($('.label.pull-right', data).text()) {
+              case 'NPC':
+                npcServers.push(ip);
+                break;
+              case 'VPC':
+                vpcServers.push(ip);
+                break;
+              case 'Clan Server':
+                clanServers.push(ip);
+                break;
+              default:
+                npcServers.push(ip);
+            }
+          }
+        })
+        .catch(err => {
+          console.log(`Couldn't check ${ip}. Reason:`);
+          console.error(err);
+          erroring.push(ip);
+        })
+        .then(() => {
+          updateResults();
+          resolve();
+        });
     }
-    return false;
-};
+  });
+}
 
-IPChecker.Utils.isLoggedIn = function() {
-    return $('a[href="logout"]').length > 0;
-};
+function updateResults() {
+  $('#npc-input').val(npcServers.join('\n'));
+  $('#npc-input-amount').text(formatNumber(npcServers.length));
+  $('#vpc-input').val(vpcServers.join('\n'));
+  $('#vpc-input-amount').text(formatNumber(vpcServers.length));
+  $('#clan-input').val(clanServers.join('\n'));
+  $('#clan-input-amount').text(formatNumber(clanServers.length));
 
-IPChecker.Utils.isOnPage = function(page) {
-    return window.location.pathname === page;
-};
+  $('#results textarea').each(function () {
+    $(this).scrollTop($(this)[0].scrollHeight);
+  });
 
-IPChecker.Checker = {};
+  $('#amount-checked').text(formatNumber(npcServers.length + vpcServers.length + clanServers.length + nonExisting.length + erroring.length));
+  $('#amount-failed').text(formatNumber(erroring.length));
+  $('#amount-non-existing').text(formatNumber(nonExisting.length));
+}
 
-IPChecker.Checker.linkToInject = '<span class="pull-right hide-phone"><a href="javascript:void(0)" id="ipCheckLink">Check IP\'s</a></span>';
-IPChecker.Checker.inputModal = '<div class="fade modal"role=dialog id=inputModal tabindex=-1><div class=modal-dialog role=document><div class=modal-content><div class=modal-header><button class=close type=button data-dismiss=modal aria-label=Close><span aria-hidden=true>×</span></button><h4 class=modal-title>HE IP Checker by <a href="https://legacy.hackerexperience.com/profile?id=510033"target=_blank>Jasperr</a> (v' + GM_info.script.version + ')</h4></div><form id=inputForm><div class=modal-body><div class=form-group><label class=control-label for=ipInput>Please input your IP\'s or logs below and it will give you back all existing VPC\'s and Clan IP\'s.</label><textarea class=form-control id=ipInput placeholder="Place your IP\'s or logs here"rows=10 style=min-width:90%></textarea></div></div><div class=modal-footer><button class="btn btn-default"type=button data-dismiss=modal>Close</button> <button class="btn btn-primary"type=submit id=inputSubmitButton>Check my IP\'s</button></div></form></div></div></div>';
-IPChecker.Checker.isChecking = false;
-IPChecker.Checker.totalChecked = 0;
-IPChecker.Checker.totalIPsToCheck = 0;
-IPChecker.Checker.nonExisting = 0;
-IPChecker.Checker.errors = 0;
-IPChecker.Checker.NPCs = [];
-IPChecker.Checker.VPCs = [];
-IPChecker.Checker.ClanServers = [];
-IPChecker.Checker.IPsToCheck = [];
-IPChecker.Checker.currentIP;
+function startChecking() {
+  isChecking = true;
 
-IPChecker.Checker.bindLinkEvent = function() {
-    $('#ipCheckLink').on('click', function(event) {
-        IPChecker.Checker.ipCheckLinkClick();
+  const ips = getIPsToCheck();
+
+  if (ips.length === 0) {
+    notify('There are no IP\'s to check.');
+    isChecking = false;
+    return;
+  }
+
+  const promises = ips.map(ip => () => checkIP(ip));
+
+  npcServers = [];
+  vpcServers = [];
+  clanServers = [];
+  nonExisting = [];
+  erroring = [];
+  updateResults();
+  $('#amount-total').text(formatNumber(ips.length));
+
+  $('#submit-button').text('Cancel').addClass('btn-danger').removeClass('btn-primary');
+  $('[data-dismiss=modal]').attr('disabled', true);
+
+  const start = () =>
+    executePromises(promises).then(() => {
+      visitIP(getCurrentIP()).catch(() => {}).then(() => {
+        $('#submit-button').text('Check my IP\'s').addClass('btn-primary').removeClass('btn-danger');
+        $('[data-dismiss=modal]').attr('disabled', false);
+
+        isChecking = false;
+        isCancelling = false;
+      });
     });
-};
 
-IPChecker.Checker.ipCheckLinkClick = function() {
-    $('#inputModal').modal('show');
-    $('.modal-backdrop').removeClass('modal-backdrop');
-};
+  if ($('#results').css('display') === 'none') {
+    $('#input-modal').css('width', '75%').css('left', '12.5%').css('margin-left', 0);
+    setTimeout(() => $('#results').slideDown(1000), 1000);
+    setTimeout(() => start(), 2000);
+  } else {
+    start();
+  }
+}
 
-IPChecker.Checker.checkIPs = function(ipArray) {
-    if (!IPChecker.Checker.isChecking) {
-        IPChecker.Checker.isChecking = true;
-        IPChecker.Checker.totalChecked = 0;
-        IPChecker.Checker.nonExisting = 0;
-        IPChecker.Checker.errors = 0;
-        IPChecker.Checker.NPCs = [];
-        IPChecker.Checker.VPCs = [];
-        IPChecker.Checker.ClanServers = [];
+$(document).ready(() => {
+  if ($('a[href="logout"]').length > 0) {
+    const interval = setInterval(() => {
+      if ($('.header-ip-show').text().trim().length > 0) {
+        clearInterval(interval);
 
-        IPChecker.Checker.totalIPsToCheck = ipArray.length;
-        IPChecker.Checker.IPsToCheck = ipArray;
+        $('body').append(modal);
+        $('#breadcrumb').append(modalLink);
 
-        $('#inputSubmitButtonAmountTotal').text(IPChecker.Checker.totalIPsToCheck);
-        
-        IPChecker.Checker.checkIPArray();
-    }
-};
+        $('#input-form').on('submit', e => {
+          e.preventDefault();
 
-IPChecker.Checker.checkIPArray = function() {
-    if (IPChecker.Checker.isChecking) {
-        if (IPChecker.Checker.totalChecked === IPChecker.Checker.totalIPsToCheck) {
-            $.get(window.location.origin + '/internet?ip=' + IPChecker.Checker.currentIP).always(function() {
-                IPChecker.Checker.finishSubmit();
-            });
-            return;
-        }
-
-        var ip = IPChecker.Checker.IPsToCheck[0];
-        IPChecker.Checker.IPsToCheck.splice(0, 1);
-
-        $.get(window.location.origin + '/internet?ip=' + ip).done(function(data) {
-                if ($('.widget-content:contains("404")', data).length) {
-                    IPChecker.Checker.nonExisting++;
-                } else {
-                    switch ($('.label.pull-right', data).text()) {
-                        case 'NPC':
-                            IPChecker.Checker.NPCs.push(ip);
-                            break;
-                        case 'VPC':
-                            IPChecker.Checker.VPCs.push(ip);
-                            break;
-                        case 'Clan Server':
-                            IPChecker.Checker.ClanServers.push(ip);
-                            break;
-                        default:
-                            IPChecker.Checker.NPCs.push(ip);
-                    }
-                }
-            }).fail(function() {
-                IPChecker.Checker.errors++;
-            }).always(function() {
-                IPChecker.Checker.totalChecked++;
-                IPChecker.Checker.checkIPArray();
-                $('#inputSubmitButtonAmountDone').text(IPChecker.Checker.totalChecked);
-            });
-    }
-};
-
-IPChecker.Checker.submitInput = function() {
-    $('#inputSubmitButton').prop('disabled', true);
-    $('#inputSubmitButton').html('Working on it (<span id="inputSubmitButtonAmountDone">0</span>/<span id="inputSubmitButtonAmountTotal">0</span>)');
-
-    var validIPs = [...new Set($('#ipInput').val().match(/(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/g))].filter(IPChecker.Utils.validateIP);
-
-    if (validIPs.length == 0) {
-        IPChecker.Utils.notify('HE IP Checker', 'You didn\'t input any IP\'s or all your IP\'s were invalid or you only put in the ISP IP which doesn\'t get checked.');
-
-        $('#inputSubmitButton').prop('disabled', false);
-        isChecking = false;
-        $('#inputSubmitButton').text('Check my IP\'s');
-        IPChecker.Checker.bindLinkEvent();
-
-        return;
-    }
-
-    if (validIPs.length > 2500) {
-        IPChecker.Utils.notify('HE IP Checker', 'You can only check 2500 IP\'s at a time.');
-
-        $('#inputSubmitButton').prop('disabled', false);
-        isChecking = false;
-        $('#inputSubmitButton').text('Check my IP\'s');
-        IPChecker.Checker.bindLinkEvent();
-
-        return;
-    }
-
-    IPChecker.Checker.checkIPs(validIPs);
-};
-
-IPChecker.Checker.finishSubmit = function() {
-    var text = 'Checked ' + IPChecker.Checker.totalIPsToCheck + ' IP\'s of which ' + IPChecker.Checker.nonExisting + ' didn\'t exist (' + IPChecker.Checker.errors + ' errors occurred). There were ' + IPChecker.Checker.NPCs.length + ' NPC\'s, ' + IPChecker.Checker.VPCs.length + ' VPC\'s and ' + IPChecker.Checker.ClanServers.length + ' Clan servers.';
-    if (IPChecker.Checker.NPCs.length > 0) {
-        text += '\n\nNPC IP\'s (' + IPChecker.Checker.NPCs.length + ')\n\n';
-        text += IPChecker.Checker.NPCs.join('\n');
-    }
-    if (IPChecker.Checker.VPCs.length > 0) {
-        text += '\n\nVPC IP\'s (' + IPChecker.Checker.VPCs.length + ')\n\n';
-        text += IPChecker.Checker.VPCs.join('\n');
-    }
-    if (IPChecker.Checker.ClanServers.length > 0) {
-        text += '\n\nClan Server IP\'s (' + IPChecker.Checker.ClanServers.length + ')\n\n';
-        text += IPChecker.Checker.ClanServers.join('\n');
-    }
-
-    $('#ipInput').val(text);
-    $('#inputSubmitButton').prop('disabled', false);
-    IPChecker.Checker.isChecking = false;
-    $('#inputSubmitButton').html('Check my IP\'s');
-    IPChecker.Checker.bindLinkEvent();
-};
-
-$(document).ready(function() {
-    if (IPChecker.Utils.isLoggedIn()) {
-        $('#breadcrumb').append(IPChecker.Checker.linkToInject);
-        $('body').append(IPChecker.Checker.inputModal);
-
-        $('#inputForm').submit(function(event) {
-            event.preventDefault();
-            IPChecker.Checker.submitInput();
+          if (isChecking) {
+            isCancelling = true;
+          } else {
+            startChecking();
+          }
         });
 
-        if (IPChecker.Utils.isOnPage('/internet') && IPChecker.Utils.getParameterByName('ip') && IPChecker.Utils.validateIP(IPChecker.Utils.getParameterByName('ip'))) {
-            IPChecker.Checker.currentIP = IPChecker.Utils.getParameterByName('ip');
-        } else {
-            IPChecker.Checker.currentIP = '1.2.3.4';
-        }
+        $('#ip-check-link').on('click', () => {
+          $('#input-modal').modal('show');
+          $('.modal-backdrop').removeClass('modal-backdrop');
+        });
 
-        IPChecker.Checker.bindLinkEvent();
-    }
+        $('#input-modal').on('shown.bs.modal', () => {
+          $('#ip-input').focus();
+        });
+
+        $('#ignored-input').val(`
+${ISP_IP} - ISP
+${$('.header-ip-show').text()} - You
+    `.trim());
+
+        $('#results').hide();
+      }
+    }, 100);
+  }
 });
