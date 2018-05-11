@@ -3,5 +3,5 @@ HE IP Checker is a little userscript that checks IP addresses for their types an
 
 ## Installation
 1. Make sure you got a userscript manager installed. I recommend [Tampermonkey](http://tampermonkey.net/).
-2. Go to [here](https://gitcdn.xyz/repo/JvanMerle/hacker-experience-ip-checker/master/HEIPChecker.user.js) and click Install in the tab that opens.
+2. Go to [here](https://github.com/jmerle/hacker-experience-ip-checker/raw/master/he-ip-checker.user.js) and click Install in the tab that opens.
 3. Done! Updates will be installed automatically. When you don't change Tampermonkey's default settings, it checks for updates daily.
