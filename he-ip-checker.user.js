@@ -23,7 +23,7 @@ const modal = `
             HE IP Checker by <a href="https://legacy.hackerexperience.com/profile?id=510033" target="_blank">Jasperr</a>
           </h4>
         </div>
-      
+
         <form id="input-form">
           <div class="modal-body">
             <div class="row-fluid">
@@ -36,11 +36,11 @@ const modal = `
                 <textarea id="ignored-input" class="form-control" style="width: calc(100% - 15px);" rows="10"></textarea>
               </div>
             </div>
-            
+
             <div id="results">
               <div class="row-fluid">
                 <div class="span3">
-                  <label style="font-weight: bold;">Information</label>               
+                  <label style="font-weight: bold;">Information</label>
                   <b>Progress: </b><span id="amount-checked">0</span> / <span id="amount-total">0</span>
                   <br>
                   <b>Non-existing IP's: </b><span id="amount-non-existing">0</span>
@@ -64,7 +64,7 @@ const modal = `
               </div>
             </div>
           </div>
-          
+
           <div class="modal-footer">
             <button class="btn btn-default" data-dismiss="modal" type="button">Close</button>
             <button class="btn btn-primary" id="submit-button" type="submit">Check my IP's</button>
